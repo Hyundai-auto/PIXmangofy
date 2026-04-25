@@ -13,15 +13,14 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.post('/api/pix', async (req, res) => {
-    console.log('--- Nova requisição PIX (Mangofy) ---');
+    console.log('--- Nova requisição PIX (Mangofy Corrigido) ---');
     
-    // Limpa espaços extras que podem vir do .env
+    // Limpa espaços extras
     const apiKey = process.env.MANGOFY_API_KEY ? process.env.MANGOFY_API_KEY.trim() : null;
     const storeCode = process.env.MANGOFY_STORE_CODE ? process.env.MANGOFY_STORE_CODE.trim() : null;
 
-    console.log('Chaves carregadas e limpas.');
-
     if (!apiKey || !storeCode) {
+        console.error('ERRO: Chaves não encontradas no .env');
         return res.status(500).json({ success: false, error: 'Chaves ausentes no .env' });
     }
 
@@ -30,9 +29,9 @@ app.post('/api/pix', async (req, res) => {
         const amountInCents = Math.round(parseFloat(amount) * 100);
 
         const payload = {
-            amount: amountInCents,
-            payment_method: 'pix',
             store_code: storeCode,
+            payment_method: 'pix',
+            amount: amountInCents,
             customer: {
                 name: payer_name ? payer_name.trim().split(' ')[0] : 'Cliente',
                 email: 'cliente@email.com',
@@ -49,16 +48,19 @@ app.post('/api/pix', async (req, res) => {
             }
         };
 
-        // Enviando tanto no x-api-key quanto no Authorization para garantir
+        console.log('Enviando requisição com cabeçalhos Authorization e Store-Code...');
+
+        // SEGUNDO A DOC: Authorization deve conter a API KEY pura (sem Bearer)
+        // E o Store-Code deve ser enviado no cabeçalho também
         const response = await fetch('https://checkout.mangofy.com.br/api/v1/payment', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json',
-                'x-api-key': apiKey,
-                'Authorization': `Bearer ${apiKey}`
+                'Authorization': apiKey,
+                'Store-Code': storeCode
             },
-            body: JSON.stringify(payload )
+            body: JSON.stringify(payload)
         });
 
         const data = await response.json();
