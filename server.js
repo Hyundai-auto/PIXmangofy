@@ -13,7 +13,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
 app.post("/api/pix", async (req, res) => {
-    console.log("--- Nova requisição PIX (Mapeamento de Resposta) ---");
+    console.log("--- Nova requisição PIX (Campo Confirmado) ---");
     
     const apiKey = process.env.MANGOFY_API_KEY ? process.env.MANGOFY_API_KEY.trim() : null;
     const storeCode = process.env.MANGOFY_STORE_CODE ? process.env.MANGOFY_STORE_CODE.trim() : null;
@@ -74,40 +74,26 @@ app.post("/api/pix", async (req, res) => {
             return res.status(500).json({ success: false, error: data.message || "Erro na Mangofy" });
         }
 
-        // LOG CRÍTICO: Vamos ver exatamente como a Mangofy envia o PIX
-        console.log("RESPOSTA SUCESSO MANGOFY:", JSON.stringify(data, null, 2));
-
-        // Tenta capturar o código PIX em todas as variações possíveis
+        // Mapeamento final baseado no log real do usuário
         let pixCode = null;
         
-        // Opção 1: Dentro do objeto pix (padrão documentação)
-        if (data.pix) {
-            if (data.pix.qrcode_copy_and_paste) pixCode = data.pix.qrcode_copy_and_paste;
-            else if (data.pix.qrcode) pixCode = data.pix.qrcode;
-            else if (data.pix.code) pixCode = data.pix.code;
-            else if (typeof data.pix === 'string') pixCode = data.pix;
-        }
-        
-        // Opção 2: Na raiz do objeto
-        if (!pixCode) {
-            pixCode = data.pix_code || data.qrcode_copy_and_paste || data.qrcode || data.payment_pix_code;
-        }
-
-        // Opção 3: Dentro de um objeto 'data' ou 'payment'
-        if (!pixCode && data.data) {
-            pixCode = data.data.pix_code || data.data.qrcode_copy_and_paste || data.data.qrcode;
+        if (data.pix && data.pix.pix_qrcode_text) {
+            pixCode = data.pix.pix_qrcode_text;
+        } else if (data.pix && data.pix.qrcode_copy_and_paste) {
+            pixCode = data.pix.qrcode_copy_and_paste;
+        } else if (data.pix_code) {
+            pixCode = data.pix_code;
         }
 
         if (!pixCode) {
-            console.error("CÓDIGO PIX NÃO ENCONTRADO NA RESPOSTA ACIMA.");
+            console.error("CÓDIGO PIX NÃO ENCONTRADO. RESPOSTA:", JSON.stringify(data, null, 2));
             return res.status(500).json({ 
                 success: false, 
-                error: "PIX gerado, mas o código não foi encontrado na resposta. Verifique os logs do servidor.",
-                debug_info: data // Enviamos para o front para ajudar no debug se necessário
+                error: "PIX gerado, mas o código não foi encontrado na resposta."
             });
         }
 
-        console.log("PIX CAPTURADO COM SUCESSO!");
+        console.log("PIX GERADO E CAPTURADO COM SUCESSO!");
         return res.json({ success: true, pixCode: pixCode });
 
     } catch (err) {
