@@ -13,21 +13,18 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
 app.post("/api/pix", async (req, res) => {
-    console.log("--- Nova requisição PIX (Mangofy Final) ---");
+    console.log("--- Nova requisição PIX (Dados Reais) ---");
     
     const apiKey = process.env.MANGOFY_API_KEY ? process.env.MANGOFY_API_KEY.trim() : null;
     const storeCode = process.env.MANGOFY_STORE_CODE ? process.env.MANGOFY_STORE_CODE.trim() : null;
 
     if (!apiKey || !storeCode) {
-        return res.status(500).json({ success: false, error: "Configuração ausente no servidor (.env)" });
+        return res.status(500).json({ success: false, error: "Configuração ausente no servidor." });
     }
 
     try {
-        const { payer_name, amount, payer_document, payer_phone } = req.body;
+        const { payer_name, payer_email, payer_document, payer_phone, amount } = req.body;
         
-        // Limpeza rigorosa de dados para evitar gateway_error
-        const cleanCPF = payer_document.replace(/\D/g, '');
-        const cleanPhone = payer_phone.replace(/\D/g, '');
         const amountInCents = Math.round(parseFloat(amount) * 100);
         const externalCode = `PIX-${Date.now()}`;
 
@@ -38,7 +35,7 @@ app.post("/api/pix", async (req, res) => {
             payment_format: "regular",
             installments: 1,
             payment_amount: amountInCents,
-            postback_url: process.env.POSTBACK_URL || "https://simples-pay.onrender.com/",
+            postback_url: process.env.POSTBACK_URL || "https://seusite.com/webhook",
             items: [
                 { 
                     name: "Pedido Online",
@@ -49,9 +46,9 @@ app.post("/api/pix", async (req, res) => {
             ],
             customer: {
                 name: payer_name,
-                email: "cliente@email.com", // Email fixo para evitar erros de validação se o front não enviar
-                phone: cleanPhone,
-                document: cleanCPF,
+                email: payer_email,
+                phone: payer_phone,
+                document: payer_document,
                 ip: req.headers["x-forwarded-for"] || req.connection.remoteAddress || "127.0.0.1"
             },
             pix: {
@@ -72,37 +69,24 @@ app.post("/api/pix", async (req, res) => {
 
         const data = await response.json();
 
-        // Se a Mangofy retornar gateway_error ou erro de status
         if (!response.ok || data.payment_status === "gateway_error") {
             console.error("Erro Mangofy:", JSON.stringify(data, null, 2));
-            
-            let userFriendlyError = "Erro no processamento do PIX.";
-            if (data.payment_status === "gateway_error") {
-                userFriendlyError = "O gateway de pagamento recusou a transação. Verifique se o CPF é válido ou tente novamente mais tarde.";
-            }
-
             return res.status(500).json({ 
                 success: false, 
-                error: userFriendlyError,
-                status: data.payment_status 
+                error: data.payment_status === "gateway_error" ? "O gateway recusou a transação. Use dados reais e válidos." : (data.message || "Erro na Mangofy")
             });
         }
 
-        // Extração do código PIX
         let pixCode = null;
         if (data.pix && data.pix.qrcode_copy_and_paste) pixCode = data.pix.qrcode_copy_and_paste;
         else if (data.pix_code) pixCode = data.pix_code;
         else if (data.qrcode_copy_and_paste) pixCode = data.qrcode_copy_and_paste;
 
         if (!pixCode) {
-            return res.status(500).json({ success: false, error: "PIX gerado, mas código não encontrado na resposta." });
+            return res.status(500).json({ success: false, error: "Código PIX não encontrado na resposta." });
         }
 
-        return res.json({
-            success: true,
-            pixCode: pixCode,
-            orderId: data.payment_code || data.id
-        });
+        return res.json({ success: true, pixCode: pixCode });
 
     } catch (err) {
         console.error("Erro Crítico:", err);
