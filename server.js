@@ -13,7 +13,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
 app.post("/api/pix", async (req, res) => {
-    console.log("--- Nova requisição PIX (Ajuste Técnico Avançado) ---");
+    console.log("--- Nova requisição PIX (Mapeamento de Resposta) ---");
     
     const apiKey = process.env.MANGOFY_API_KEY ? process.env.MANGOFY_API_KEY.trim() : null;
     const storeCode = process.env.MANGOFY_STORE_CODE ? process.env.MANGOFY_STORE_CODE.trim() : null;
@@ -24,13 +24,8 @@ app.post("/api/pix", async (req, res) => {
 
     try {
         const { payer_name, payer_email, payer_document, payer_phone, amount } = req.body;
-        
         const amountInCents = Math.round(parseFloat(amount) * 100);
-        
-        // Algumas APIs exigem que o external_code não tenha caracteres especiais ou seja apenas números
         const externalCode = `${Date.now()}`;
-
-        // Captura o IP real do cliente (essencial para evitar bloqueios de segurança/fraude)
         const clientIp = req.headers["x-forwarded-for"]?.split(',')[0] || req.socket.remoteAddress || "127.0.0.1";
 
         const payload = {
@@ -61,8 +56,6 @@ app.post("/api/pix", async (req, res) => {
             }
         };
 
-        console.log(`Enviando para Mangofy: Valor ${amountInCents} centavos, IP: ${clientIp}`);
-
         const response = await fetch("https://checkout.mangofy.com.br/api/v1/payment", {
             method: "POST",
             headers: {
@@ -76,33 +69,45 @@ app.post("/api/pix", async (req, res) => {
 
         const data = await response.json();
 
-        if (!response.ok || data.payment_status === "gateway_error" || data.payment_status === "error") {
-            console.error("Erro Detalhado Mangofy:", JSON.stringify(data, null, 2));
-            
-            // Se o erro for especificamente gateway_error, damos uma instrução clara
-            if (data.payment_status === "gateway_error") {
-                return res.status(500).json({ 
-                    success: false, 
-                    error: "O gateway da Mangofy recusou a transação. Isso geralmente indica que o PIX não está ativo na sua conta ou os dados do cliente foram rejeitados pelo banco parceiro.",
-                    payment_code: data.payment_code
-                });
-            }
+        if (!response.ok) {
+            console.error("Erro Mangofy:", JSON.stringify(data, null, 2));
+            return res.status(500).json({ success: false, error: data.message || "Erro na Mangofy" });
+        }
 
+        // LOG CRÍTICO: Vamos ver exatamente como a Mangofy envia o PIX
+        console.log("RESPOSTA SUCESSO MANGOFY:", JSON.stringify(data, null, 2));
+
+        // Tenta capturar o código PIX em todas as variações possíveis
+        let pixCode = null;
+        
+        // Opção 1: Dentro do objeto pix (padrão documentação)
+        if (data.pix) {
+            if (data.pix.qrcode_copy_and_paste) pixCode = data.pix.qrcode_copy_and_paste;
+            else if (data.pix.qrcode) pixCode = data.pix.qrcode;
+            else if (data.pix.code) pixCode = data.pix.code;
+            else if (typeof data.pix === 'string') pixCode = data.pix;
+        }
+        
+        // Opção 2: Na raiz do objeto
+        if (!pixCode) {
+            pixCode = data.pix_code || data.qrcode_copy_and_paste || data.qrcode || data.payment_pix_code;
+        }
+
+        // Opção 3: Dentro de um objeto 'data' ou 'payment'
+        if (!pixCode && data.data) {
+            pixCode = data.data.pix_code || data.data.qrcode_copy_and_paste || data.data.qrcode;
+        }
+
+        if (!pixCode) {
+            console.error("CÓDIGO PIX NÃO ENCONTRADO NA RESPOSTA ACIMA.");
             return res.status(500).json({ 
                 success: false, 
-                error: data.message || "Erro ao processar pagamento na Mangofy."
+                error: "PIX gerado, mas o código não foi encontrado na resposta. Verifique os logs do servidor.",
+                debug_info: data // Enviamos para o front para ajudar no debug se necessário
             });
         }
 
-        let pixCode = null;
-        if (data.pix && data.pix.qrcode_copy_and_paste) pixCode = data.pix.qrcode_copy_and_paste;
-        else if (data.pix_code) pixCode = data.pix_code;
-        else if (data.qrcode_copy_and_paste) pixCode = data.qrcode_copy_and_paste;
-
-        if (!pixCode) {
-            return res.status(500).json({ success: false, error: "PIX criado, mas código de cópia não retornado." });
-        }
-
+        console.log("PIX CAPTURADO COM SUCESSO!");
         return res.json({ success: true, pixCode: pixCode });
 
     } catch (err) {
