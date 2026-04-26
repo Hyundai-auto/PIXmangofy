@@ -1,7 +1,7 @@
 {
-  "name": "checkout-pagarme",
+  "name": "checkout-mangofy",
   "version": "1.0.0",
-  "description": "Backend para checkout com integração pagar.me PIX",
+  "description": "Backend para checkout com integração Mangofy PIX",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
